@@ -9,8 +9,12 @@
     "routes": [
       {
         "src": "/(.*)",
-        "dest": "app.py"
+        "dest": "/app.py"
       }
-    ]
+    ],
+    "env": {
+      "SUPABASE_URL": "https://krtfgygfynhsveoxogex.supabase.co",
+      "SUPABASE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtydGZneWdmeW5oc3Zlb3hvZ2V4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjM0ODMxNjIsImV4cCI6MjAzOTA1OTE2Mn0.eO_zJ97Zuf3QQHLJ48ZwEsZQ4bWr6jxj-N8IwJOBYHk"
+    }
   }
   
