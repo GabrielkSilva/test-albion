@@ -10,7 +10,7 @@ import time
 app = Flask(__name__)
 
 RATE_LIMIT_STATUS = 429  # Código HTTP para "Too Many Requests"
-RATE_LIMIT_WAIT_TIME = 30  # Tempo de espera em segundos
+RATE_LIMIT_WAIT_TIME = 60  # Tempo de espera em segundos
 MAX_RETRIES = 3  # Número máximo de tentativas
 
 # Configuração do Supabase
@@ -109,7 +109,7 @@ async def collect_data(start_index=0):
                     item_data.append(data)
                 
                 # Pausa de 1.5 segundos entre chamadas de API
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.1)
 
             if not item_data:
                 print(f"Nenhum dado disponível para {item['UniqueName']} em todas as cidades. Adicionando à lista negra.")
@@ -131,7 +131,7 @@ async def collect_data(start_index=0):
                 print(f"Erro ao atualizar o índice no Supabase: {str(e)}")
 
             # Pausa de 1.5 segundos entre cada iteração do item
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.1)
 
         if start_index + len(items_data) >= len(items_data):
             start_index = 0
