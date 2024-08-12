@@ -137,8 +137,13 @@ async def collect_data(start_index=0):
 def collect():
     result = supabase.table('collection_status').select('current_index').execute()
     current_index = result.data[0]['current_index'] if result.data else 0
-    asyncio.run(collect_data(current_index))
-    return "Data collection started!"
+    
+    try:
+        asyncio.run(collect_data(current_index))
+        return render_template('index.html', message="Data collection started successfully!")
+    except Exception as e:
+        return render_template('index.html', message=f"Failed to start data collection: {str(e)}")
+
 
 if __name__ == "__main__":
     app.run(debug=True)
