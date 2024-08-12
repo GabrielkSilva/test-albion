@@ -25,15 +25,18 @@ with open('items.json', 'r', encoding='utf-8') as f:
 cities = ['Bridgewatch', 'Caerleon', 'Fort Sterling', 'Lymhurst', 'Martlock', 'Thetford', 'Black Market']
 
 def read_blacklist():
-    try:
-        with open('blacklist.json', 'r') as f:
-            return set(json.load(f))
-    except FileNotFoundError:
-        return set()
+    result = supabase.table('blacklist').select('unique_name').execute()
+    if result.data:
+        return set(item['unique_name'] for item in result.data)
+    return set()
 
-def write_blacklist(blacklist):
-    with open('blacklist.json', 'w') as f:
-        json.dump(list(blacklist), f)
+
+def add_to_blacklist(item):
+    try:
+        supabase.table('blacklist').insert({'unique_name': item}).execute()
+    except Exception as e:
+        print(f"Erro ao adicionar item à blacklist: {str(e)}")
+
 
 blacklist = read_blacklist()
 
@@ -91,6 +94,8 @@ async def fetch_item_data(session, item, city):
 
 async def collect_data(start_index=0):
     global blacklist
+    blacklist = read_blacklist()  # Atualiza a blacklist da tabela
+
     async with aiohttp.ClientSession() as session:
         for item in items_data[start_index:]:
             if item['UniqueName'] in blacklist:
@@ -104,12 +109,11 @@ async def collect_data(start_index=0):
                     item_data.append(data)
                 
                 # Pausa de 1.5 segundos entre chamadas de API
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(1)
 
             if not item_data:
                 print(f"Nenhum dado disponível para {item['UniqueName']} em todas as cidades. Adicionando à lista negra.")
-                blacklist.add(item['UniqueName'])
-                write_blacklist(blacklist)
+                add_to_blacklist(item['UniqueName'])  # Adiciona à blacklist
                 continue
 
             for data in item_data:
@@ -127,10 +131,11 @@ async def collect_data(start_index=0):
                 print(f"Erro ao atualizar o índice no Supabase: {str(e)}")
 
             # Pausa de 1.5 segundos entre cada iteração do item
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(1)
 
         if start_index + len(items_data) >= len(items_data):
             start_index = 0
+
 
 
 import threading
