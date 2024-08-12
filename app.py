@@ -127,7 +127,7 @@ async def collect_data(start_index=0):
                 print(f"Erro ao atualizar o índice no Supabase: {str(e)}")
 
             # Pausa de 1.5 segundos entre cada iteração do item
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(0.3)
 
         if start_index + len(items_data) >= len(items_data):
             start_index = 0
