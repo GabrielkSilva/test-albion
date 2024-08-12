@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Item Prices Collection</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <h1>Item Prices Collection</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>Item Name</th>
+                <th>City</th>
+                <th>Sell Price Min</th>
+                <th>Buy Price Max</th>
+            </tr>
+        </thead>
+        <tbody id="item-prices">
+            <!-- Data will be inserted here -->
+        </tbody>
+    </table>
+
+    <script>
+        const SUPABASE_URL = 'https://krtfgygfynhsveoxogex.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtydGZneWdmeW5oc3Zlb3hvZ2V4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjM0ODMxNjIsImV4cCI6MjAzOTA1OTE2Mn0.eO_zJ97Zuf3QQHLJ48ZwEsZQ4bWr6jxj-N8IwJOBYHk';
+
+        async function fetchItemPrices() {
+            const response = await fetch(`${SUPABASE_URL}/rest/v1/item_prices`, {
+                headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`
+                }
+            });
+            const data = await response.json();
+            return data;
+        }
+
+        async function displayItemPrices() {
+            const itemPrices = await fetchItemPrices();
+            const tbody = document.getElementById('item-prices');
+            itemPrices.forEach(item => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${item.item_name}</td>
+                    <td>${item.city}</td>
+                    <td>${item.sell_price_min}</td>
+                    <td>${item.buy_price_max}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', displayItemPrices);
+    </script>
+</body>
+</html>
