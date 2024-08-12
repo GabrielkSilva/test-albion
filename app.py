@@ -133,17 +133,27 @@ async def collect_data(start_index=0):
             start_index = 0
 
 
+import threading
+
 @app.route('/')
 def collect():
     result = supabase.table('collection_status').select('current_index').execute()
     current_index = result.data[0]['current_index'] if result.data else 0
     
-    try:
-        asyncio.run(collect_data(current_index))
-        return render_template('index.html', message="Data collection started successfully!")
-    except Exception as e:
-        return render_template('index.html', message=f"Failed to start data collection: {str(e)}")
+    def background_collect():
+        try:
+            asyncio.run(collect_data(current_index))
+        except Exception as e:
+            print(f"Erro durante a coleta de dados: {str(e)}")
+
+    # Inicia a coleta em um thread separado
+    thread = threading.Thread(target=background_collect)
+    thread.start()
+    
+    return render_template('index.html', message="Data collection started in the background!")
+
 
 
 if __name__ == "__main__":
     app.run(debug=True)
+    
