@@ -5,13 +5,19 @@ import aiohttp
 from aiohttp import ClientResponseError
 from supabase import create_client, Client
 from datetime import datetime
-import time
+import threading
 
 app = Flask(__name__)
 
 RATE_LIMIT_STATUS = 429  # Código HTTP para "Too Many Requests"
 RATE_LIMIT_WAIT_TIME = 60  # Tempo de espera em segundos
 MAX_RETRIES = 3  # Número máximo de tentativas
+
+# Variável global para controlar a taxa de verificação (itens por segundo)
+ITEMS_PER_SECOND = 10.0  # Exemplo: 1 item por segundo
+
+# Calcular o delay entre as verificações
+ITEM_DELAY = 1 / ITEMS_PER_SECOND
 
 # Configuração do Supabase
 url: str = "https://krtfgygfynhsveoxogex.supabase.co"
@@ -30,16 +36,19 @@ def read_blacklist():
         return set(item['unique_name'] for item in result.data)
     return set()
 
-
 def add_to_blacklist(item):
     try:
         supabase.table('blacklist').insert({'unique_name': item}).execute()
     except Exception as e:
         print(f"Erro ao adicionar item à blacklist: {str(e)}")
 
+def update_collection_status(index):
+    try:
+        supabase.table('collection_status').update({'current_index': index}).eq('id', 1).execute()
+    except Exception as e:
+        print(f"Erro ao atualizar o índice no Supabase: {str(e)}")
 
 blacklist = read_blacklist()
-
 
 async def fetch_item_data(session, item, city):
     retries = 0
@@ -95,9 +104,14 @@ async def fetch_item_data(session, item, city):
 async def collect_data(start_index=0):
     global blacklist
     blacklist = read_blacklist()  # Atualiza a blacklist da tabela
+    processed_items = 0
+    items_processed = []
 
     async with aiohttp.ClientSession() as session:
         for item in items_data[start_index:]:
+            if processed_items >= 30:
+                break
+
             if item['UniqueName'] in blacklist:
                 print(f"Pulando item na lista negra: {item['UniqueName']}")
                 continue
@@ -108,7 +122,7 @@ async def collect_data(start_index=0):
                 if data:
                     item_data.append(data)
                 
-                # Pausa de 1.5 segundos entre chamadas de API
+                # Pausa entre chamadas de API
                 await asyncio.sleep(0.1)
 
             if not item_data:
@@ -124,21 +138,17 @@ async def collect_data(start_index=0):
                     print(f"Erro ao inserir dados no Supabase para {item['UniqueName']} em {data['city']}: {str(e)}")
 
             print(f"Processed item: {item['UniqueName']}")
+            items_processed.append(item)
             
-            try:
-                supabase.table('collection_status').update({'current_index': int(item['Index'])}).eq('id', 1).execute()
-            except Exception as e:
-                print(f"Erro ao atualizar o índice no Supabase: {str(e)}")
+            # Atualiza o índice atual na tabela 'collection_status'
+            update_collection_status(item['Index'])
 
-            # Pausa de 1.5 segundos entre cada iteração do item
-            await asyncio.sleep(0.1)
+            # Pausa entre a verificação de itens
+            await asyncio.sleep(ITEM_DELAY)
 
-        if start_index + len(items_data) >= len(items_data):
-            start_index = 0
-
-
-
-import threading
+        # Atualiza o índice na tabela de status da coleta
+        if items_processed:
+            update_collection_status(items_processed[-1]['Index'] + 1)
 
 @app.route('/')
 def collect():
@@ -157,8 +167,5 @@ def collect():
     
     return render_template('index.html', message="Data collection started in the background!")
 
-
-
 if __name__ == "__main__":
     app.run(debug=True)
-    
