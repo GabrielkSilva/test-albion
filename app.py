@@ -104,7 +104,7 @@ async def collect_data(start_index=0):
                     item_data.append(data)
                 
                 # Pausa de 1.5 segundos entre chamadas de API
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(0.3)
 
             if not item_data:
                 print(f"Nenhum dado disponível para {item['UniqueName']} em todas as cidades. Adicionando à lista negra.")
