@@ -6,19 +6,17 @@ from aiohttp import ClientResponseError
 from datetime import datetime
 import threading
 from flask import Flask, render_template, jsonify
-from flask_cors import CORS  # Importe o CORS
+from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app) 
 
-# Configurações
 RATE_LIMIT_STATUS = 429
 RATE_LIMIT_WAIT_TIME = 40
 MAX_RETRIES = 3
-ITEMS_PER_SECOND = 1.0  # Ajustado para respeitar o limite de 300 chamadas a cada 5 minutos
+ITEMS_PER_SECOND = 1.0
 ITEM_DELAY = 1 / ITEMS_PER_SECOND
 
-# Configuração do banco de dados SQLite
 DB_NAME = '/tmp/albion_market.db'
 
 def init_db():
@@ -45,7 +43,6 @@ def init_db():
 
 init_db()
 
-# Carregar dados dos itens
 with open('items.json', 'r', encoding='utf-8') as f:
     items_data = json.load(f)
 
@@ -194,17 +191,22 @@ def collect():
     result = c.fetchone()
     current_index = result[0] if result else 0
     conn.close()
-    
+
     def background_collect():
         try:
-            asyncio.run(collect_data(current_index))
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(collect_data(current_index))
         except Exception as e:
             print(f"Erro durante a coleta de dados: {str(e)}")
+        finally:
+            loop.close()
 
     thread = threading.Thread(target=background_collect)
     thread.start()
-    
+
     return render_template('index.html', message="Data collection started in the background!")
+
 
 def save_profitable_items(items):
     conn = sqlite3.connect(DB_NAME)
@@ -222,7 +224,7 @@ def save_profitable_items(items):
 
 def calculate_profitable_items():
     conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row  # Adicione esta linha
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute("SELECT * FROM item_prices")
     items = c.fetchall()
