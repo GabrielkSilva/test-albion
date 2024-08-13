@@ -19,7 +19,7 @@ ITEMS_PER_SECOND = 1.0  # Ajustado para respeitar o limite de 300 chamadas a cad
 ITEM_DELAY = 1 / ITEMS_PER_SECOND
 
 # Configuração do banco de dados SQLite
-DB_NAME = 'albion_market.db'
+DB_NAME = '/tmp/albion_market.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
