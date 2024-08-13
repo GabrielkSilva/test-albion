@@ -6,8 +6,10 @@ from aiohttp import ClientResponseError
 from datetime import datetime
 import threading
 from flask import Flask, render_template, jsonify
+from flask_cors import CORS  # Importe o CORS
 
 app = Flask(__name__)
+CORS(app) 
 
 # Configurações
 RATE_LIMIT_STATUS = 429
@@ -297,19 +299,23 @@ def show_database():
 
 @app.route('/api/profitable_items')
 def api_profitable_items():
-    profitable_items = calculate_profitable_items()
-    
-    serializable_items = {}
-    for unique_name, item_data in profitable_items.items():
-        serializable_items[unique_name] = {
-            'city': item_data['city'],
-            'buy_price_max': item_data['buy_price_max'],
-            'sell_price_min': item_data['sell_price_min'],
-            'profit': item_data['profit'],
-            'profit_percentage': item_data['profit_percentage']
-        }
-    
-    return jsonify(serializable_items)
+    try:
+        profitable_items = calculate_profitable_items()
+        
+        serializable_items = {}
+        for unique_name, item_data in profitable_items.items():
+            serializable_items[unique_name] = {
+                'city': item_data['city'],
+                'buy_price_max': item_data['buy_price_max'],
+                'sell_price_min': item_data['sell_price_min'],
+                'profit': item_data['profit'],
+                'profit_percentage': item_data['profit_percentage']
+            }
+        
+        return jsonify(serializable_items)
+    except Exception as e:
+        print(f"Erro ao buscar itens lucrativos: {str(e)}")
+        return jsonify({"error": "Erro ao buscar itens lucrativos"}), 500
 
 if __name__ == "__main__":
     app.run(debug=True)
