@@ -185,7 +185,8 @@ async def collect_data(start_index=0):
             processed_items += 1
             await asyncio.sleep(ITEM_DELAY)
 
-        update_collection_status(items_data[start_index + processed_items - 1]['Index'] + 1)
+        last_processed_index = items_data[start_index + processed_items - 1]['Index'] if processed_items > 0 else start_index
+        update_collection_status(last_processed_index + 1)
         log_message(f"Coleta de dados concluída. Processados {processed_items} itens.")
 
 @app.route('/')
@@ -231,7 +232,7 @@ def save_profitable_items(items):
 
 def calculate_profitable_items():
     conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row  # Adicione esta linha
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute("SELECT * FROM item_prices")
     items = c.fetchall()
@@ -276,15 +277,33 @@ def calculate_profitable_items():
     return limited_items
 
 
-@app.route('/profit')
-def profit():
-    profitable_items = calculate_profitable_items()
-    
-    save_profitable_items(profitable_items)
-    
-    limited_items = dict(list(profitable_items.items())[:100])
-    
-    return render_template('profit.html', items=limited_items)
+@app.route('/')
+def collect():
+    def generate():
+        async def run_collection():
+            conn = sqlite3.connect(DB_NAME)
+            c = conn.cursor()
+            c.execute("SELECT current_index FROM collection_status WHERE id = 1")
+            result = c.fetchone()
+            current_index = result[0] if result else 0
+            conn.close()
+
+            async for data in collect_data(current_index):
+                yield f"data: {json.dumps(data)}\n\n"
+
+        async def wrapper():
+            async for item in run_collection():
+                yield item
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            for item in loop.run_until_complete(wrapper().__anext__()):
+                yield item
+        finally:
+            loop.close()
+
+    return Response(stream_with_context(generate()), content_type='text/event-stream')
 
 @app.route('/db')
 def show_database():
