@@ -3,9 +3,10 @@ import sqlite3
 import json
 import asyncio
 import aiohttp
-from aiohttp import ClientSession, ClientResponseError, ClientConnectorError
-from datetime import datetime
 import threading
+from aiohttp import ClientSession
+from contextlib import asynccontextmanager
+from datetime import datetime
 from flask import Response, stream_with_context
 from flask_cors import CORS
 
@@ -102,32 +103,14 @@ async def fetch_with_retry(session, url, max_retries=5, delay=1):
                 return None
             await asyncio.sleep(delay * (2 ** attempt))  # exponential backoff
 
-async def fetch_item_data(session, item, city):
-    if item is None or 'UniqueName' not in item:
-        print(f"Item inválido: {item}")
-        return None
+@asynccontextmanager
+async def get_session():
+    session = ClientSession()
+    try:
+        yield session
+    finally:
+        await session.close()
 
-    if item['UniqueName'] in blacklist:
-        log_message(f"Pulando item na lista negra: {item['UniqueName']}")
-        return None  # Mudamos 'continue' para 'return None'
-
-    url = f"https://west.albion-online-data.com/api/v2/stats/prices/{item['UniqueName']}?locations={city}"
-    data = await fetch_with_retry(session, url)
-    
-    if data and len(data) > 0:
-        return {
-            'unique_name': str(item['UniqueName']),
-            'city': str(city),
-            'sell_price_min': str(data[0].get('sell_price_min', '0')),
-            'buy_price_max': str(data[0].get('buy_price_max', '0')),
-            'item_name': str(item.get('LocalizedNames', {}).get('PT-BR') or item.get('LocalizedNames', {}).get('EN-US', 'Unknown')),
-            'index': str(item.get('Index', '0')),
-            'last_updated_date': str(data[0].get('sell_price_min_date', datetime.utcnow().isoformat())),
-            'last_saved_date': str(datetime.utcnow().isoformat())
-        }
-    else:
-        print(f"Nenhum dado disponível para {item['UniqueName']} em {city}")
-        return None
 
 async def collect_data(start_index=0):
     global blacklist
@@ -135,7 +118,7 @@ async def collect_data(start_index=0):
     processed_items = 0
     log_message(f"Iniciando coleta de dados a partir do índice {start_index}")
 
-    async with aiohttp.ClientSession() as session:
+    async with get_session() as session:
         for item in items_data[start_index:]:
             if processed_items >= 30:
                 break
@@ -161,33 +144,37 @@ async def collect_data(start_index=0):
                 add_to_blacklist(item['UniqueName'])
                 continue
 
-            conn = sqlite3.connect(DB_NAME)
-            c = conn.cursor()
-            for data in item_data:
-                try:
-                    c.execute('''INSERT OR REPLACE INTO item_prices 
-                        (unique_name, city, sell_price_min, buy_price_max, item_name, index_value, last_updated_date, last_saved_date) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (str(data['unique_name']), str(data['city']), 
-                        int(data['sell_price_min'] or 0), int(data['buy_price_max'] or 0),
-                        str(data['item_name']), int(data['index'] or 0), 
-                        str(data['last_updated_date']), str(data['last_saved_date'])))
-                    log_message(f"Dados inseridos no banco para {data['unique_name']} em {data['city']}")
-                except Exception as e:
-                    error_msg = f"Erro ao inserir dados no SQLite para {item['UniqueName']} em {data['city']}: {str(e)}"
-                    print(error_msg)
-                    log_message(error_msg)
-            conn.commit()
-            conn.close()
+            # Save data to database
+            await save_item_data(item_data)
 
             update_collection_status(item['Index'])
 
             processed_items += 1
-            await asyncio.sleep(ITEM_DELAY)
 
         last_processed_index = items_data[start_index + processed_items - 1]['Index'] if processed_items > 0 else start_index
         update_collection_status(last_processed_index + 1)
         log_message(f"Coleta de dados concluída. Processados {processed_items} itens.")
+
+async def save_item_data(item_data):
+    conn = await aiosqlite.connect(DB_NAME)
+    try:
+        async with conn.cursor() as c:
+            for data in item_data:
+                await c.execute('''INSERT OR REPLACE INTO item_prices 
+                    (unique_name, city, sell_price_min, buy_price_max, item_name, index_value, last_updated_date, last_saved_date) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (str(data['unique_name']), str(data['city']), 
+                    int(data['sell_price_min'] or 0), int(data['buy_price_max'] or 0),
+                    str(data['item_name']), int(data['index'] or 0), 
+                    str(data['last_updated_date']), str(data['last_saved_date'])))
+                log_message(f"Dados inseridos no banco para {data['unique_name']} em {data['city']}")
+        await conn.commit()
+    except Exception as e:
+        error_msg = f"Erro ao inserir dados no SQLite: {str(e)}"
+        print(error_msg)
+        log_message(error_msg)
+    finally:
+        await conn.close()
 
 @app.route('/')
 def collect():
@@ -203,17 +190,9 @@ def collect():
             async for data in collect_data(current_index):
                 yield f"data: {json.dumps(data)}\n\n"
 
-        async def wrapper():
-            async for item in run_collection():
-                yield item
-
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        try:
-            for item in loop.run_until_complete(wrapper().__anext__()):
-                yield item
-        finally:
-            loop.close()
+        return loop.run_until_complete(run_collection())
 
     return Response(stream_with_context(generate()), content_type='text/event-stream')
 
