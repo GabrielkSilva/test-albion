@@ -4,12 +4,13 @@ import asyncio
 import aiohttp
 from aiohttp import ClientResponseError
 from datetime import datetime
-import threading
 from flask import Flask, render_template, jsonify
 from flask_cors import CORS
+from flask_socketio import SocketIO
 
 app = Flask(__name__)
-CORS(app) 
+CORS(app)
+socketio = SocketIO(app)
 
 RATE_LIMIT_STATUS = 429
 RATE_LIMIT_WAIT_TIME = 40
@@ -185,28 +186,26 @@ async def collect_data(start_index=0):
 
 @app.route('/')
 def collect():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT current_index FROM collection_status WHERE id = 1")
-    result = c.fetchone()
-    current_index = result[0] if result else 0
-    conn.close()
-
     def background_collect():
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(collect_data(current_index))
+            loop.run_until_complete(collect_data())
         except Exception as e:
-            print(f"Erro durante a coleta de dados: {str(e)}")
+            socketio.emit('log_message', {'message': f"Erro durante a coleta de dados: {str(e)}"})
         finally:
             loop.close()
 
-    thread = threading.Thread(target=background_collect)
-    thread.start()
+    socketio.start_background_task(background_collect)
+    return render_template('index.html')
 
-    return render_template('index.html', message="Data collection started in the background!")
+@socketio.on('connect')
+def on_connect():
+    print('Client connected')
 
+@socketio.on('disconnect')
+def on_disconnect():
+    print('Client disconnected')
 
 def save_profitable_items(items):
     conn = sqlite3.connect(DB_NAME)
