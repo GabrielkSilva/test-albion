@@ -5,7 +5,7 @@ import aiohttp
 from aiohttp import ClientSession, ClientResponseError, ClientConnectorError
 from datetime import datetime
 import threading
-from flask import Flask, render_template, jsonify, Response, stream_with_context
+from flask import Response, stream_with_context
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -201,10 +201,19 @@ def collect():
             async for data in collect_data(current_index):
                 yield f"data: {json.dumps(data)}\n\n"
 
-        return asyncio.run(run_collection())
+        async def wrapper():
+            async for item in run_collection():
+                yield item
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            for item in loop.run_until_complete(wrapper().__anext__()):
+                yield item
+        finally:
+            loop.close()
 
     return Response(stream_with_context(generate()), content_type='text/event-stream')
-
 def save_profitable_items(items):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
