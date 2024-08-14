@@ -4,6 +4,7 @@ import json
 import asyncio
 import aiohttp
 import threading
+import aiosqlite
 from aiohttp import ClientSession
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -21,32 +22,28 @@ ITEM_DELAY = 1 / ITEMS_PER_SECOND
 
 DB_NAME = '/tmp/albion_market.db'
 
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    
-    # Criar tabelas
-    c.execute('''CREATE TABLE IF NOT EXISTS item_prices
+async def init_db():
+    async with aiosqlite.connect(DB_NAME) as conn:
+        await conn.execute('''CREATE TABLE IF NOT EXISTS item_prices
                  (unique_name TEXT, city TEXT, sell_price_min INTEGER, buy_price_max INTEGER, 
                   item_name TEXT, index_value INTEGER, last_updated_date TEXT, last_saved_date TEXT,
                   PRIMARY KEY (unique_name, city))''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS blacklist
+        
+        await conn.execute('''CREATE TABLE IF NOT EXISTS blacklist
                  (unique_name TEXT PRIMARY KEY)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS collection_status
+        
+        await conn.execute('''CREATE TABLE IF NOT EXISTS collection_status
                  (id INTEGER PRIMARY KEY, current_index INTEGER)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS item_lucratives
+        
+        await conn.execute('''CREATE TABLE IF NOT EXISTS item_lucratives
                  (unique_name TEXT, city TEXT, PRIMARY KEY (unique_name, city))''')
 
-    c.execute('''CREATE TABLE IF NOT EXISTS logs
+        await conn.execute('''CREATE TABLE IF NOT EXISTS logs
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, 
                   timestamp TEXT, 
                   message TEXT)''')
-    
-    conn.commit()
-    conn.close()
+        
+        await conn.commit()
 
 init_db()
 
@@ -111,6 +108,21 @@ async def get_session():
     finally:
         await session.close()
 
+async def fetch_item_data(session, item, city):
+    url = f"https://west.albion-online-data.com/api/v2/stats/prices/{item['UniqueName']}?locations={city}"
+    data = await fetch_with_retry(session, url)
+    if data and len(data) > 0:
+        return {
+            'unique_name': item['UniqueName'],
+            'city': city,
+            'sell_price_min': data[0].get('sell_price_min'),
+            'buy_price_max': data[0].get('buy_price_max'),
+            'item_name': item['LocalizedNames']['EN-US'],
+            'index': item['Index'],
+            'last_updated_date': data[0].get('sell_price_min_date'),
+            'last_saved_date': datetime.utcnow().isoformat()
+        }
+    return None
 
 async def collect_data(start_index=0):
     global blacklist
@@ -177,12 +189,10 @@ async def save_item_data(item_data):
         await conn.close()
 
 async def run_collection():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT current_index FROM collection_status WHERE id = 1")
-    result = c.fetchone()
-    current_index = result[0] if result else 0
-    conn.close()
+    async with aiosqlite.connect(DB_NAME) as conn:
+        async with conn.execute("SELECT current_index FROM collection_status WHERE id = 1") as cursor:
+            result = await cursor.fetchone()
+            current_index = result[0] if result else 0
 
     async for data in collect_data(current_index):
         yield f"data: {json.dumps(data)}\n\n"
@@ -198,7 +208,7 @@ def collect():
         asyncio.set_event_loop(loop)
         return loop.run_until_complete(async_generator().__aiter__().__anext__())
 
-    return Response(stream_with_context(generate()), content_type='text/event-stream')
+        return Response(stream_with_context(run_collection()), content_type='text/event-stream')
 
 def save_profitable_items(items):
     conn = sqlite3.connect(DB_NAME)
@@ -312,4 +322,5 @@ def api_profitable_items():
         return jsonify({"error": "Erro ao buscar itens lucrativos"}), 500
 
 if __name__ == "__main__":
+    asyncio.run(init_db())
     app.run(debug=True)
