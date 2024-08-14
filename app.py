@@ -216,6 +216,7 @@ def collect():
             loop.close()
 
     return Response(stream_with_context(generate()), content_type='text/event-stream')
+
 def save_profitable_items(items):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -277,33 +278,15 @@ def calculate_profitable_items():
     return limited_items
 
 
-@app.route('/')
-def collect():
-    def generate():
-        async def run_collection():
-            conn = sqlite3.connect(DB_NAME)
-            c = conn.cursor()
-            c.execute("SELECT current_index FROM collection_status WHERE id = 1")
-            result = c.fetchone()
-            current_index = result[0] if result else 0
-            conn.close()
-
-            async for data in collect_data(current_index):
-                yield f"data: {json.dumps(data)}\n\n"
-
-        async def wrapper():
-            async for item in run_collection():
-                yield item
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            for item in loop.run_until_complete(wrapper().__anext__()):
-                yield item
-        finally:
-            loop.close()
-
-    return Response(stream_with_context(generate()), content_type='text/event-stream')
+@app.route('/profit')
+def profit():
+    profitable_items = calculate_profitable_items()
+    
+    save_profitable_items(profitable_items)
+    
+    limited_items = dict(list(profitable_items.items())[:100])
+    
+    return render_template('profit.html', items=limited_items)
 
 @app.route('/db')
 def show_database():
