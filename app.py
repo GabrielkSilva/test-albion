@@ -201,9 +201,7 @@ def collect():
             async for data in collect_data(current_index):
                 yield f"data: {json.dumps(data)}\n\n"
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        return loop.run_until_complete(run_collection())
+        return asyncio.run(run_collection())
 
     return Response(stream_with_context(generate()), content_type='text/event-stream')
 
