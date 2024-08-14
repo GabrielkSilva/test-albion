@@ -162,9 +162,6 @@ async def collect_data():
 
             update_collection_status(item['Index'])
 
-            # Adiciona um atraso de 1.1 segundos entre as coletas de dados
-            await asyncio.sleep(1.1)
-
         # Process remaining items in the batch
         if items_batch:
             item_data = await fetch_item_data(session, items_batch)
