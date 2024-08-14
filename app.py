@@ -2,15 +2,14 @@ import sqlite3
 import json
 import asyncio
 import aiohttp
-from aiohttp import ClientResponseError
+from aiohttp import ClientSession, ClientResponseError, ClientConnectorError
 from datetime import datetime
-from flask import Flask, render_template, jsonify
+import threading
+from flask import Flask, render_template, jsonify, Response, stream_with_context
 from flask_cors import CORS
-from flask_socketio import SocketIO
 
 app = Flask(__name__)
-CORS(app)
-socketio = SocketIO(app)
+CORS(app) 
 
 RATE_LIMIT_STATUS = 429
 RATE_LIMIT_WAIT_TIME = 40
@@ -38,6 +37,11 @@ def init_db():
     
     c.execute('''CREATE TABLE IF NOT EXISTS item_lucratives
                  (unique_name TEXT, city TEXT, PRIMARY KEY (unique_name, city))''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS logs
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                  timestamp TEXT, 
+                  message TEXT)''')
     
     conn.commit()
     conn.close()
@@ -68,6 +72,14 @@ def add_to_blacklist(item):
     finally:
         conn.close()
 
+def log_message(message):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("INSERT INTO logs (timestamp, message) VALUES (?, ?)",
+              (datetime.utcnow().isoformat(), message))
+    conn.commit()
+    conn.close()
+
 def update_collection_status(index):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -77,62 +89,50 @@ def update_collection_status(index):
 
 blacklist = read_blacklist()
 
-async def fetch_item_data(session, item, city):
-    retries = 0
-    while retries < MAX_RETRIES:
+async def fetch_with_retry(session, url, max_retries=5, delay=1):
+    for attempt in range(max_retries):
         try:
-            if item is None or 'UniqueName' not in item:
-                print(f"Item inválido: {item}")
-                return None
-
-            if item['UniqueName'] in blacklist:
-                print(f"Item {item['UniqueName']} está na lista negra e será ignorado.")
-                return None
-
-            url = f"https://west.albion-online-data.com/api/v2/stats/prices/{item['UniqueName']}?locations={city}"
             async with session.get(url) as response:
-                if response.status == RATE_LIMIT_STATUS:
-                    print(f"Limite de taxa atingido. Aguardando {RATE_LIMIT_WAIT_TIME} segundos antes de tentar novamente.")
-                    await asyncio.sleep(RATE_LIMIT_WAIT_TIME)
-                    retries += 1
-                    continue
-
                 response.raise_for_status()
-                data = await response.json()
-                if data and len(data) > 0:
-                    return {
-                        'unique_name': str(item['UniqueName']),
-                        'city': str(city),
-                        'sell_price_min': str(data[0].get('sell_price_min', '0')),
-                        'buy_price_max': str(data[0].get('buy_price_max', '0')),
-                        'item_name': str(item.get('LocalizedNames', {}).get('PT-BR') or item.get('LocalizedNames', {}).get('EN-US', 'Unknown')),
-                        'index': str(item.get('Index', '0')),
-                        'last_updated_date': str(data[0].get('sell_price_min_date', datetime.utcnow().isoformat())),
-                        'last_saved_date': str(datetime.utcnow().isoformat())
-                    }
-                else:
-                    print(f"Nenhum dado disponível para {item['UniqueName']} em {city}")
-                    return None
-        except ClientResponseError as e:
-            if e.status == RATE_LIMIT_STATUS:
-                print(f"Limite de taxa atingido. Aguardando {RATE_LIMIT_WAIT_TIME} segundos antes de tentar novamente.")
-                await asyncio.sleep(RATE_LIMIT_WAIT_TIME)
-                retries += 1
-            else:
-                print(f"Erro ao buscar dados para {item['UniqueName']} em {city}: {str(e)}")
+                return await response.json()
+        except (ClientResponseError, ClientConnectorError) as e:
+            if attempt == max_retries - 1:
+                print(f"Erro após {max_retries} tentativas: {str(e)}")
                 return None
-        except Exception as e:
-            print(f"Erro ao buscar dados para {item.get('UniqueName', 'Unknown')} em {city}: {str(e)}")
-            return None
+            await asyncio.sleep(delay * (2 ** attempt))  # exponential backoff
 
-    print(f"Não foi possível obter dados para {item.get('UniqueName', 'Unknown')} em {city} após {MAX_RETRIES} tentativas.")
-    return None
+async def fetch_item_data(session, item, city):
+    if item is None or 'UniqueName' not in item:
+        print(f"Item inválido: {item}")
+        return None
+
+    if item['UniqueName'] in blacklist:
+        log_message(f"Pulando item na lista negra: {item['UniqueName']}")
+        return None  # Mudamos 'continue' para 'return None'
+
+    url = f"https://west.albion-online-data.com/api/v2/stats/prices/{item['UniqueName']}?locations={city}"
+    data = await fetch_with_retry(session, url)
+    
+    if data and len(data) > 0:
+        return {
+            'unique_name': str(item['UniqueName']),
+            'city': str(city),
+            'sell_price_min': str(data[0].get('sell_price_min', '0')),
+            'buy_price_max': str(data[0].get('buy_price_max', '0')),
+            'item_name': str(item.get('LocalizedNames', {}).get('PT-BR') or item.get('LocalizedNames', {}).get('EN-US', 'Unknown')),
+            'index': str(item.get('Index', '0')),
+            'last_updated_date': str(data[0].get('sell_price_min_date', datetime.utcnow().isoformat())),
+            'last_saved_date': str(datetime.utcnow().isoformat())
+        }
+    else:
+        print(f"Nenhum dado disponível para {item['UniqueName']} em {city}")
+        return None
 
 async def collect_data(start_index=0):
     global blacklist
     blacklist = read_blacklist()
     processed_items = 0
-    items_processed = []
+    log_message(f"Iniciando coleta de dados a partir do índice {start_index}")
 
     async with aiohttp.ClientSession() as session:
         for item in items_data[start_index:]:
@@ -148,11 +148,15 @@ async def collect_data(start_index=0):
                 data = await fetch_item_data(session, item, city)
                 if data:
                     item_data.append(data)
+                    yield data
+                    log_message(f"Dados coletados para {item['UniqueName']} em {city}")
+                else:
+                    log_message(f"Nenhum dado disponível para {item['UniqueName']} em {city}")
                 
                 await asyncio.sleep(ITEM_DELAY)
 
             if not item_data:
-                print(f"Nenhum dado disponível para {item['UniqueName']} em todas as cidades. Adicionando à lista negra.")
+                log_message(f"Nenhum dado disponível para {item['UniqueName']} em todas as cidades. Adicionando à lista negra.")
                 add_to_blacklist(item['UniqueName'])
                 continue
 
@@ -167,45 +171,41 @@ async def collect_data(start_index=0):
                         int(data['sell_price_min'] or 0), int(data['buy_price_max'] or 0),
                         str(data['item_name']), int(data['index'] or 0), 
                         str(data['last_updated_date']), str(data['last_saved_date'])))
-                    print(f"Item: {data['item_name']}, City: {data['city']}, Buy Price Max: {data['buy_price_max']}, Sell Price Min: {data['sell_price_min']}, Updated At: {data['last_updated_date']}")
+                    log_message(f"Dados inseridos no banco para {data['unique_name']} em {data['city']}")
                 except Exception as e:
-                    print(f"Erro ao inserir dados no SQLite para {item['UniqueName']} em {data['city']}: {str(e)}")
+                    error_msg = f"Erro ao inserir dados no SQLite para {item['UniqueName']} em {data['city']}: {str(e)}"
+                    print(error_msg)
+                    log_message(error_msg)
             conn.commit()
             conn.close()
 
-            print(f"Processed item: {item['UniqueName']}")
-            items_processed.append(item)
-            
             update_collection_status(item['Index'])
 
             processed_items += 1
             await asyncio.sleep(ITEM_DELAY)
 
-        if items_processed:
-            update_collection_status(items_processed[-1]['Index'] + 1)
+        update_collection_status(items_data[start_index + processed_items - 1]['Index'] + 1)
+        log_message(f"Coleta de dados concluída. Processados {processed_items} itens.")
 
 @app.route('/')
 def collect():
-    def background_collect():
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(collect_data())
-        except Exception as e:
-            socketio.emit('log_message', {'message': f"Erro durante a coleta de dados: {str(e)}"})
-        finally:
-            loop.close()
+    def generate():
+        async def run_collection():
+            conn = sqlite3.connect(DB_NAME)
+            c = conn.cursor()
+            c.execute("SELECT current_index FROM collection_status WHERE id = 1")
+            result = c.fetchone()
+            current_index = result[0] if result else 0
+            conn.close()
 
-    socketio.start_background_task(background_collect)
-    return render_template('index.html')
+            async for data in collect_data(current_index):
+                yield f"data: {json.dumps(data)}\n\n"
 
-@socketio.on('connect')
-def on_connect():
-    print('Client connected')
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(run_collection())
 
-@socketio.on('disconnect')
-def on_disconnect():
-    print('Client disconnected')
+    return Response(stream_with_context(generate()), content_type='text/event-stream')
 
 def save_profitable_items(items):
     conn = sqlite3.connect(DB_NAME)
@@ -223,7 +223,7 @@ def save_profitable_items(items):
 
 def calculate_profitable_items():
     conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
+    conn.row_factory = sqlite3.Row  # Adicione esta linha
     c = conn.cursor()
     c.execute("SELECT * FROM item_prices")
     items = c.fetchall()
