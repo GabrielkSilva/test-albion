@@ -136,7 +136,8 @@ async def collect_data(start_index=0):
     log_message(f"Iniciando coleta de dados a partir do índice {start_index}")
 
     async with aiohttp.ClientSession() as session:
-        for item in items_data[start_index:]:
+        for item_index in range(start_index, len(items_data)):
+            item = items_data[item_index]
             if processed_items >= 30:
                 break
 
@@ -188,7 +189,7 @@ async def collect_data(start_index=0):
         last_processed_index = items_data[start_index + processed_items - 1]['Index'] if processed_items > 0 else start_index
         update_collection_status(last_processed_index + 1)
         log_message(f"Coleta de dados concluída. Processados {processed_items} itens. Próximo índice: {last_processed_index + 1}")
-
+        
 @app.route('/')
 def collect():
     def generate():
@@ -204,19 +205,14 @@ def collect():
             async for data in collect_data(current_index):
                 yield f"data: {json.dumps(data)}\n\n"
 
-        async def wrapper():
-            async for item in run_collection():
-                yield item
+        def run_async():
+            return asyncio.run(run_collection())
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            for item in loop.run_until_complete(wrapper()):
-                yield item
-        finally:
-            loop.close()
+        for item in run_async():
+            yield item
 
     return Response(stream_with_context(generate()), content_type='text/event-stream')
+
 @app.route('/status')
 def collection_status():
     conn = sqlite3.connect(DB_NAME)
