@@ -31,7 +31,7 @@ async def init_db():
         
         await conn.execute('''CREATE TABLE IF NOT EXISTS blacklist
                  (unique_name TEXT PRIMARY KEY)''')
-        
+
         await conn.execute('''CREATE TABLE IF NOT EXISTS collection_status
                  (id INTEGER PRIMARY KEY, current_index INTEGER)''')
         
@@ -52,13 +52,20 @@ with open('items.json', 'r', encoding='utf-8') as f:
 
 cities = ['Bridgewatch', 'Caerleon', 'Fort Sterling', 'Lymhurst', 'Martlock', 'Thetford', 'Black Market']
 
-def read_blacklist():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT unique_name FROM blacklist")
-    result = c.fetchall()
-    conn.close()
+async def read_blacklist():
+    async with aiosqlite.connect(DB_NAME) as conn:
+        async with conn.execute("SELECT unique_name FROM blacklist") as cursor:
+            result = await cursor.fetchall()
     return set(item[0] for item in result)
+
+async def ensure_db_initialized():
+    await init_db()
+    return await read_blacklist()
+
+@app.before_request
+async def before_request():
+    global blacklist
+    blacklist = await ensure_db_initialized()
 
 def add_to_blacklist(item):
     conn = sqlite3.connect(DB_NAME)
@@ -198,7 +205,7 @@ async def run_collection():
         yield f"data: {json.dumps(data)}\n\n"
 
 @app.route('/')
-def collect():
+async def collect():
     def generate():
         async def async_generator():
             async for item in run_collection():
@@ -208,7 +215,7 @@ def collect():
         asyncio.set_event_loop(loop)
         return loop.run_until_complete(async_generator().__aiter__().__anext__())
 
-        return Response(stream_with_context(run_collection()), content_type='text/event-stream')
+    return Response(stream_with_context(generate()), content_type='text/event-stream')
 
 def save_profitable_items(items):
     conn = sqlite3.connect(DB_NAME)
@@ -272,10 +279,10 @@ def calculate_profitable_items():
 
 
 @app.route('/profit')
-def profit():
-    profitable_items = calculate_profitable_items()
+async def profit():
+    profitable_items = await calculate_profitable_items()
     
-    save_profitable_items(profitable_items)
+    await save_profitable_items(profitable_items)
     
     limited_items = dict(list(profitable_items.items())[:100])
     
