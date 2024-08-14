@@ -172,7 +172,6 @@ async def collect_data(start_index=0):
                         int(data['sell_price_min'] or 0), int(data['buy_price_max'] or 0),
                         str(data['item_name']), int(data['index'] or 0), 
                         str(data['last_updated_date']), str(data['last_saved_date'])))
-                    log_message(f"Dados inseridos no banco para {data['unique_name']} em {data['city']}")
                 except Exception as e:
                     error_msg = f"Erro ao inserir dados no SQLite para {item['UniqueName']} em {data['city']}: {str(e)}"
                     print(error_msg)
@@ -181,13 +180,14 @@ async def collect_data(start_index=0):
             conn.close()
 
             update_collection_status(item['Index'])
+            log_message(f"Atualizando status de coleta para o índice {item['Index']}")
 
             processed_items += 1
             await asyncio.sleep(ITEM_DELAY)
 
         last_processed_index = items_data[start_index + processed_items - 1]['Index'] if processed_items > 0 else start_index
         update_collection_status(last_processed_index + 1)
-        log_message(f"Coleta de dados concluída. Processados {processed_items} itens.")
+        log_message(f"Coleta de dados concluída. Processados {processed_items} itens. Próximo índice: {last_processed_index + 1}")
 
 @app.route('/')
 def collect():
@@ -200,6 +200,7 @@ def collect():
             current_index = result[0] if result else 0
             conn.close()
 
+            log_message(f"Iniciando coleta a partir do índice {current_index}")
             async for data in collect_data(current_index):
                 yield f"data: {json.dumps(data)}\n\n"
 
@@ -210,12 +211,28 @@ def collect():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            for item in loop.run_until_complete(wrapper().__anext__()):
+            for item in loop.run_until_complete(wrapper()):
                 yield item
         finally:
             loop.close()
 
     return Response(stream_with_context(generate()), content_type='text/event-stream')
+@app.route('/status')
+def collection_status():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT current_index FROM collection_status WHERE id = 1")
+    result = c.fetchone()
+    current_index = result[0] if result else 0
+    conn.close()
+
+    c.execute("SELECT COUNT(*) FROM item_prices")
+    item_count = c.fetchone()[0]
+
+    return jsonify({
+        "current_index": current_index,
+        "items_collected": item_count
+    })
 
 def save_profitable_items(items):
     conn = sqlite3.connect(DB_NAME)
