@@ -176,23 +176,27 @@ async def save_item_data(item_data):
     finally:
         await conn.close()
 
+async def run_collection():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT current_index FROM collection_status WHERE id = 1")
+    result = c.fetchone()
+    current_index = result[0] if result else 0
+    conn.close()
+
+    async for data in collect_data(current_index):
+        yield f"data: {json.dumps(data)}\n\n"
+
 @app.route('/')
 def collect():
     def generate():
-        async def run_collection():
-            conn = sqlite3.connect(DB_NAME)
-            c = conn.cursor()
-            c.execute("SELECT current_index FROM collection_status WHERE id = 1")
-            result = c.fetchone()
-            current_index = result[0] if result else 0
-            conn.close()
-
-            async for data in collect_data(current_index):
-                yield f"data: {json.dumps(data)}\n\n"
+        async def async_generator():
+            async for item in run_collection():
+                yield item
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        return loop.run_until_complete(run_collection())
+        return loop.run_until_complete(async_generator().__aiter__().__anext__())
 
     return Response(stream_with_context(generate()), content_type='text/event-stream')
 
