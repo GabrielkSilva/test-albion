@@ -1,12 +1,13 @@
 {
-  "name": "albion-craft-(data-server)",
+  "name": "albion-data",
   "version": "1.0.0",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node app.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": ""
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongoose": "^7.1.0",
+    "cors": "^2.8.5"
+  }
 }
