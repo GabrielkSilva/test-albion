@@ -17,44 +17,51 @@ def index():
     return render_template('index.html')
 
 def calculate_profitable_items():
-    items = list(items_collection.find())
-    
-    if not items:
-        return {}
-
-    item_profit = {}
-    
-    for item in items:
-        unique_name = item['unique_name']
-        city = item['city']
-        buy_price_max = item['buy_price_max']
-        sell_price_min = item['sell_price_min']
-        
-        if buy_price_max == 0 or sell_price_min == 0:
-            continue
-        
-        profit = sell_price_min - buy_price_max
-        profit_percentage = (profit / buy_price_max) * 100 if buy_price_max > 0 else 0
-        
-        if unique_name not in item_profit or profit > item_profit[unique_name]['profit']:
-            item_profit[unique_name] = {
-                'city': city,
-                'buy_price_max': buy_price_max,
-                'sell_price_min': sell_price_min,
-                'profit': profit,
-                'profit_percentage': profit_percentage
+    pipeline = [
+        {
+            '$match': {
+                'buy_price_max': {'$gt': 0},
+                'sell_price_min': {'$gt': 0}
             }
-    
-    filtered_items = {
-        unique_name: data for unique_name, data in item_profit.items()
-        if data['profit_percentage'] > 15
-    }
-    
-    sorted_items = dict(sorted(filtered_items.items(), key=lambda x: x[1]['profit'], reverse=True))
-    
-    limited_items = dict(list(sorted_items.items())[:100])
-    
-    return limited_items
+        },
+        {
+            '$project': {
+                'unique_name': 1,
+                'city': 1,
+                'buy_price_max': 1,
+                'sell_price_min': 1,
+                'profit': {
+                    '$subtract': ['$sell_price_min', '$buy_price_max']
+                },
+                'profit_percentage': {
+                    '$multiply': [
+                        {
+                            '$divide': [
+                                {'$subtract': ['$sell_price_min', '$buy_price_max']},
+                                '$buy_price_max'
+                            ]
+                        },
+                        100
+                    ]
+                }
+            }
+        },
+        {
+            '$match': {
+                'profit_percentage': {'$gt': 15}
+            }
+        },
+        {
+            '$sort': {'profit': -1}
+        },
+        {
+            '$limit': 100
+        }
+    ]
+
+    items = list(items_collection.aggregate(pipeline))
+    return {item['unique_name']: item for item in items}
+
 
 @app.route('/profit')
 def profit():
