@@ -9,7 +9,20 @@ app.use(cors());
 mongoose.connect('mongodb+srv://gaabriieel2233:5Skt7kY0rtJoiQS8@albion-data.e5j2tli.mongodb.net/albion-data', {
     useNewUrlParser: true,
     useUnifiedTopology: true,
+})
+.then(() => console.log('MongoDB connected'))
+.catch(err => console.error('MongoDB connection error:', err));
+
+mongoose.connection.on('disconnected', () => {
+    console.error('MongoDB disconnected. Trying to reconnect...');
+    setTimeout(() => {
+        mongoose.connect('mongodb+srv://gaabriieel2233:5Skt7kY0rtJoiQS8@albion-data.e5j2tli.mongodb.net/albion-data', {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+        }).catch(err => console.error('MongoDB reconnection error:', err));
+    }, 5000); // Tenta reconectar após 5 segundos
 });
+
 
 const itemSchema = new mongoose.Schema({
     unique_name: String,
@@ -39,6 +52,10 @@ app.get('/profit', async (req, res) => {
 
 app.get('/db', async (req, res) => {
     try {
+        if (!mongoose.connection.readyState) {
+            throw new Error("MongoDB connection is not established");
+        }
+
         const collections = await mongoose.connection.db.listCollections().toArray();
         const allData = {};
         
@@ -53,6 +70,7 @@ app.get('/db', async (req, res) => {
         res.status(500).send("Server Error");
     }
 });
+
 
 app.get('/api/profitable_items', async (req, res) => {
     try {
