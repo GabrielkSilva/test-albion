@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database View</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+        h1 { color: #333; }
+        .table-selector { margin-bottom: 20px; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+    </style>
+</head>
+<body>
+    <h1>Database View</h1>
+    
+    <div class="table-selector">
+        <label for="table-select">Select Table:</label>
+        <select id="table-select" onchange="showTable(this.value)">
+            {% for table in tables %}
+                <option value="{{ table }}">{{ table }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    {% for table in tables %}
+        <div id="{{ table }}" style="display: none;">
+            <h2>{{ table }}</h2>
+            {% if data[table] %}
+                <table>
+                    <thead>
+                        <tr>
+                            {% for column in data[table][0].keys() %}
+                                <th>{{ column }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in data[table] %}
+                            <tr>
+                                {% for value in row.values() %}
+                                    <td>{{ value }}</td>
+                                {% endfor %}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p>This table is empty.</p>
+            {% endif %}
+        </div>
+    {% endfor %}
+
+    <script>
+        function showTable(tableName) {
+            // Hide all tables
+            var tables = document.querySelectorAll('div[id]');
+            tables.forEach(function(table) {
+                table.style.display = 'none';
+            });
+
+            // Show the selected table
+            var selectedTable = document.getElementById(tableName);
+            if (selectedTable) {
+                selectedTable.style.display = 'block';
+            }
+        }
+
+        // Show the first table by default
+        window.onload = function() {
+            var firstTable = document.querySelector('select option');
+            if (firstTable) {
+                showTable(firstTable.value);
+            }
+        };
+    </script>
+</body>
+</html>
