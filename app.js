@@ -20,9 +20,8 @@ mongoose.connection.on('disconnected', () => {
             useNewUrlParser: true,
             useUnifiedTopology: true,
         }).catch(err => console.error('MongoDB reconnection error:', err));
-    }, 5000); // Tenta reconectar após 5 segundos
+    }, 5000);
 });
-
 
 const itemSchema = new mongoose.Schema({
     unique_name: String,
@@ -33,6 +32,10 @@ const itemSchema = new mongoose.Schema({
 
 const Item = mongoose.model('Item', itemSchema);
 
+// Configurando o EJS como mecanismo de visualização
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'views', 'index.html'));
 });
@@ -40,10 +43,8 @@ app.get('/', (req, res) => {
 app.get('/profit', async (req, res) => {
     try {
         const profitableItems = await calculateProfitableItems();
-        
         const limitedItems = profitableItems.slice(0, 100);
-        
-        res.render('profit.html', { items: limitedItems });
+        res.render('profit', { items: limitedItems });
     } catch (error) {
         console.error("Error fetching profitable items: ", error);
         res.status(500).send("Server Error");
@@ -58,19 +59,18 @@ app.get('/db', async (req, res) => {
 
         const collections = await mongoose.connection.db.listCollections().toArray();
         const allData = {};
-        
+
         for (const collection of collections) {
             const data = await mongoose.connection.db.collection(collection.name).find().toArray();
             allData[collection.name] = data;
         }
-        
-        res.render('database.html', { tables: collections, data: allData });
+
+        res.render('database', { tables: collections, data: allData });
     } catch (error) {
         console.error("Error fetching database: ", error);
         res.status(500).send("Server Error");
     }
 });
-
 
 app.get('/api/profitable_items', async (req, res) => {
     try {
