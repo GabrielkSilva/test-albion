@@ -57,11 +57,16 @@ app.get('/db', async (req, res) => {
             throw new Error("MongoDB connection is not established");
         }
 
-        const collections = await mongoose.connection.db.listCollections().toArray();
+        const db = mongoose.connection.db;
+        if (!db) {
+            throw new Error("Database object is not available");
+        }
+
+        const collections = await db.listCollections().toArray();
         const allData = {};
 
         for (const collection of collections) {
-            const data = await mongoose.connection.db.collection(collection.name).find().toArray();
+            const data = await db.collection(collection.name).find().toArray();
             allData[collection.name] = data;
         }
 
@@ -71,6 +76,7 @@ app.get('/db', async (req, res) => {
         res.status(500).send("Server Error");
     }
 });
+
 
 app.get('/api/profitable_items', async (req, res) => {
     try {
